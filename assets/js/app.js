@@ -76,14 +76,17 @@ async function scan(){
  busy=true;
  visibleStage('uploadStage');startScanVisual(file);
  scanAbort=new AbortController();
+ let scanTimedOut=false;
+ const scanTimeout=setTimeout(()=>{scanTimedOut=true;scanAbort?.abort();},155000);
+ $('scanPhase').textContent='क्लाउड सर्वर पर नक्शा पढ़ा जा रहा है — free hosting पर थोड़ा समय लग सकता है…';
  const data=new FormData();data.append('plan',file,file.name);
  try{
   const res=await fetch('api/scan.php',{method:'POST',body:data,cache:'no-store',signal:scanAbort.signal});
-  const response=await res.json().catch(()=>({ok:false,error:'Server returned invalid response'}));
+  const response=await res.json().catch(()=>({ok:false,error:`Cloud server returned HTTP ${res.status}. Open Render service logs to check the scanner.`}));
   if(ticket!==currentTicket)return;
   if(!res.ok||!response.ok)throw Error(response.error||'Scanner did not finish');
   scanData=response;
-  image=await loadImage(response.upload_url);
+  image=await Promise.race([loadImage(response.upload_url),new Promise((_,reject)=>setTimeout(()=>reject(Error('Server returned scan data, but the uploaded map preview did not load. Please retry.')),18000))]);
   if(ticket!==currentTicket)return;
   rooms=(response.rooms||[]).filter(r=>Array.isArray(r.polygon)&&r.polygon.length>=3).map((r,i)=>({
    ...r, id:String(r.id||`r${i+1}`),type:String(r.type||'unknown'),
@@ -95,8 +98,15 @@ async function scan(){
   stopScanVisual();
   showResult();
   if(rooms.some(r=>r.type==='unknown'))void runBrowserOCR(ticket);
- }catch(err){if(ticket===currentTicket){stopScanVisual();if(err.name!=='AbortError')setStatus('Scan fail हुआ: '+err.message+'। Apache और Python scanner check करें या साफ नक्शा चुनें।',true);}}
- finally{if(ticket===currentTicket){busy=false;scanAbort=null;}}
+ }catch(err){
+  if(ticket===currentTicket){
+   stopScanVisual();
+   if(scanTimedOut) setStatus('Cloud scanner timeout: करीब ढाई मिनट में response नहीं मिला। Render Free पर OCR बहुत धीमा हो सकता है। छोटा साफ़ PNG/JPG चुनकर फिर कोशिश करें।',true);
+   else if(err.name!=='AbortError') setStatus('Scan fail हुआ: '+err.message+' — Render Web Service के Logs देखें या छोटा floor-plan upload करें।',true);
+  }
+ }
+ finally{clearTimeout(scanTimeout);if(ticket===currentTicket){busy=false;scanAbort=null;}}
+
 }
 function showResult({keepScroll=false}={}){
  if(!rooms.length||!image)return;

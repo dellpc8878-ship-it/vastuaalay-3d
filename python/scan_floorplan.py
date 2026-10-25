@@ -6,11 +6,13 @@ from incomplete linework are approximate and included with detection metadata.
 Usage: python scan_floorplan.py input.png [output.json] [preview.png]
 """
 from __future__ import annotations
-import json, sys, re, math
+import json, sys, re, math, os
 from pathlib import Path
 import cv2
 import numpy as np
 
+# Render Free provides only a fraction of a CPU. Avoid repeated expensive OCR passes.
+FAST_CLOUD_OCR = os.environ.get('VASTU_FAST_OCR', '1').lower() not in ('0','false','no')
 ROOM_ALIASES={
  'bedroom':['bed room','bedroom','master bed','m bed','bed rm','शयन'],
  'kitchen':['kitchen','kltchen','kitohen','cook room','रसोई'],
@@ -50,15 +52,30 @@ def load_image(path):
   doc=fitz.open(str(path))
   if len(doc)<1:raise ValueError('Empty PDF')
   if len(doc)>1:warn.append('Only PDF page 1 analyzed')
-  pix=doc[0].get_pixmap(matrix=fitz.Matrix(2.5,2.5),alpha=False)
+  page=doc[0]
+  # A large architectural PDF at 2.5x can exhaust a 512 MB cloud instance.
+  longest=max(float(page.rect.width),float(page.rect.height),1)
+  scale=min(2.5, (1700 if FAST_CLOUD_OCR else 2200)/longest)
+  pix=page.get_pixmap(matrix=fitz.Matrix(scale,scale),alpha=False)
   im=cv2.cvtColor(np.frombuffer(pix.samples,dtype=np.uint8).reshape(pix.height,pix.width,3),cv2.COLOR_RGB2BGR)
   doc.close()
  else:
-  im=cv2.imdecode(np.fromfile(str(path),dtype=np.uint8),cv2.IMREAD_COLOR)
+  if FAST_CLOUD_OCR:
+   # Downscale while decoding where possible; don't materialize a huge OpenCV array.
+   from PIL import Image, ImageOps
+   with Image.open(str(path)) as source:
+    if source.width * source.height > 50_000_000:
+     raise ValueError('Image resolution is too large for free hosting; please upload a smaller PNG/JPG.')
+    source=ImageOps.exif_transpose(source)
+    source.thumbnail((1700,1700),Image.Resampling.BILINEAR)
+    im=cv2.cvtColor(np.asarray(source.convert('RGB')),cv2.COLOR_RGB2BGR)
+  else:
+   im=cv2.imdecode(np.fromfile(str(path),dtype=np.uint8),cv2.IMREAD_COLOR)
  if im is None or min(im.shape[:2])<150:raise ValueError('Map image unreadable or too small')
  h,w=im.shape[:2]
- if max(h,w)>2200:
-  s=2200/max(h,w);im=cv2.resize(im,(round(w*s),round(h*s)),interpolation=cv2.INTER_AREA)
+ max_dim=1700 if FAST_CLOUD_OCR else 2200
+ if max(h,w)>max_dim:
+  s=max_dim/max(h,w);im=cv2.resize(im,(round(w*s),round(h*s)),interpolation=cv2.INTER_AREA)
  if min(im.shape[:2])<450:warn.append('Low-resolution image: small names and walls may be unclear.')
  return im,warn
 
@@ -129,17 +146,17 @@ def ocr_map(img):
  enlarged=cv2.resize(img,None,fx=scale,fy=scale,interpolation=cv2.INTER_CUBIC) if scale!=1 else img
  gray=cv2.cvtColor(enlarged,cv2.COLOR_BGR2GRAY)
  candidates=[];raw=[]
- for psm in (3,11,6,12):
+ for psm in ((3,11,6) if FAST_CLOUD_OCR else (3,11,6,12)):
   try:
-   d=pyt.image_to_data(gray,lang=lang,config=f'--psm {psm}',output_type=pyt.Output.DICT,timeout=18)
+   d=pyt.image_to_data(gray,lang=lang,config=f'--psm {psm}',output_type=pyt.Output.DICT,timeout=12 if FAST_CLOUD_OCR else 18)
   except Exception as e:warning=str(e)[:130];continue
   candidates.extend(_lines_from_ocr(d,scale,0,(h,w),psm))
   raw.extend(str(t) for t in d['text'] if str(t).strip())
  # Rotate original to recognize vertically written PARKING, STAIR, dimensions.
- for code,rotation in [(cv2.ROTATE_90_CLOCKWISE,1),(cv2.ROTATE_90_COUNTERCLOCKWISE,2)]:
+ for code,rotation in ([(cv2.ROTATE_90_CLOCKWISE,1)] if FAST_CLOUD_OCR else [(cv2.ROTATE_90_CLOCKWISE,1),(cv2.ROTATE_90_COUNTERCLOCKWISE,2)]):
   try:
    rot=cv2.rotate(gray,code)
-   d=pyt.image_to_data(rot,lang=lang,config='--psm 11',output_type=pyt.Output.DICT,timeout=15)
+   d=pyt.image_to_data(rot,lang=lang,config='--psm 11',output_type=pyt.Output.DICT,timeout=12 if FAST_CLOUD_OCR else 15)
    candidates.extend(_lines_from_ocr(d,scale,rotation,(h,w),11))
   except Exception:pass
  # NMS using label text/type and spatial proximity; only one label at each location.
@@ -294,7 +311,7 @@ def _enclosed_small_labels(img,bounds,existing):
   if x<bounds[0]+3 or y<bounds[1]+3 or x+rw>bounds[2]-3 or y+rh>bounds[3]-3:continue
   if any(math.hypot(cx-o['x'],cy-o['y'])<.4*max(rw,rh) for o in existing):continue
   regions.append((rw*rh,x,y,rw,rh))
- regions=sorted(regions,reverse=True)[:18]
+ regions=sorted(regions,reverse=True)[:5 if FAST_CLOUD_OCR else 18]
  output=[]
  for _,x,y,rw,rh in regions:
   inset=max(2,min(9,int(min(rw,rh)*.035)))
@@ -304,9 +321,9 @@ def _enclosed_small_labels(img,bounds,existing):
   resize=cv2.resize(crop,None,fx=factor,fy=factor,interpolation=cv2.INTER_CUBIC)
   g=cv2.cvtColor(resize,cv2.COLOR_BGR2GRAY)
   snippets=[]
-  for mode in (6,11):
+  for mode in ((11,) if FAST_CLOUD_OCR else (6,11)):
    try:
-    d=pyt.image_to_data(g,config=f'--psm {mode}',lang=lang,output_type=pyt.Output.DICT,timeout=5)
+    d=pyt.image_to_data(g,config=f'--psm {mode}',lang=lang,output_type=pyt.Output.DICT,timeout=7 if FAST_CLOUD_OCR else 5)
    except Exception:continue
    cands=_lines_from_ocr(d,factor,0,crop.shape[:2],mode)
    snippets.extend(cands)

@@ -41,7 +41,7 @@
         <a href="#vastuReport" id="reportsLink" class="nav-link">Reports</a>
       </nav>
       <div class="header-actions">
-        <span class="version">AUTO v7.0</span>
+        <span class="version">AUTO v7.1</span>
         <button id="newBtn" class="new-btn" type="button" title="नया नक्शा अपलोड करें"><span aria-hidden="true">↻</span><span>नया नक्शा</span></button>
       </div>
     </div>
@@ -139,6 +139,6 @@
   <footer>ॐ · शुभ गृह, शुभ जीवन <span class="dot">•</span> VASTUAALAY 3D</footer>
   <div id="toast" class="toast hidden" role="alert"></div>
   <script defer src="assets/js/ritual.js?v=7.0.0"></script>
-  <script type="module" src="assets/js/app.js?v=7.0.0"></script>
+  <script type="module" src="assets/js/app.js?v=7.1.0"></script>
 </body>
 </html>

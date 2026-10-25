@@ -25,10 +25,63 @@ $script=dirname(__DIR__).DIRECTORY_SEPARATOR.'python'.DIRECTORY_SEPARATOR.'scan_
 if(!function_exists('proc_open'))respond(500,['ok'=>false,'error'=>'PHP proc_open is disabled. Enable it in php.ini for local scanning.']);
 $preview=$extension==='pdf'?$folder.DIRECTORY_SEPARATOR.$id.'-preview.png':null;
 $cmd=[VASTU_PYTHON,$script,$path,'',$preview??''];
+// Avoid overlapping OCR processes exhausting Render Free's 512MB RAM.
+$storage=dirname(__DIR__).'/storage';
+if (!is_dir($storage)) @mkdir($storage,0750,true);
+$lockHandle=@fopen($storage.'/.scan.lock','c');
+if (!$lockHandle || !@flock($lockHandle,LOCK_EX|LOCK_NB)) {
+    @unlink($path);
+    respond(429,['ok'=>false,'error'=>'Cloud scanner is busy. Please retry after the current scan finishes.']);
+}
+register_shutdown_function(static function() use ($lockHandle): void {
+    if(is_resource($lockHandle)){@flock($lockHandle,LOCK_UN);@fclose($lockHandle);}
+});
+$started=microtime(true);
+$maxSeconds=130;
 $descriptors=[0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']];
 $process=@proc_open($cmd,$descriptors,$pipes,dirname(__DIR__));
-if(!is_resource($process))respond(500,['ok'=>false,'error'=>'Could not run Python. Check api/config.php and Python installation.']);
-fclose($pipes[0]);$stdout=stream_get_contents($pipes[1]);fclose($pipes[1]);$stderr=stream_get_contents($pipes[2]);fclose($pipes[2]);$status=proc_close($process);
+if(!is_resource($process))respond(500,['ok'=>false,'error'=>'Cloud Python process could not start. Check Render server logs.']);
+fclose($pipes[0]);
+stream_set_blocking($pipes[1],false);
+stream_set_blocking($pipes[2],false);
+$stdout='';$stderr='';$timedOut=false;
+$reportedExit=-1;
+while(true){
+    $read=[];
+    if(!feof($pipes[1]))$read[]=$pipes[1];
+    if(!feof($pipes[2]))$read[]=$pipes[2];
+    if($read){
+        $write=null;$except=null;
+        @stream_select($read,$write,$except,1,0);
+        foreach($read as $stream){
+            $chunk=@fread($stream,65536);
+            if($chunk!==false&&$chunk!==''){
+                if($stream===$pipes[1])$stdout.=substr($chunk,0,max(0,1500000-strlen($stdout)));
+                else $stderr.=substr($chunk,0,max(0,100000-strlen($stderr)));
+            }
+        }
+    }else usleep(100000);
+    $processInfo=proc_get_status($process);
+    if(!$processInfo['running']){
+        $reportedExit=(int)$processInfo['exitcode'];
+        $stdout.=stream_get_contents($pipes[1]);
+        $stderr.=stream_get_contents($pipes[2]);
+        break;
+    }
+    if(microtime(true)-$started>$maxSeconds){
+        $timedOut=true;
+        @proc_terminate($process,15);
+        break;
+    }
+}
+fclose($pipes[1]);fclose($pipes[2]);
+$status=proc_close($process);
+if($status<0&&$reportedExit>=0)$status=$reportedExit;
+if($timedOut){
+    error_log('[VASTUAALAY] Cloud OCR timed out after '.round(microtime(true)-$started).' seconds. STDERR: '.substr($stderr,0,500));
+    respond(504,['ok'=>false,'error'=>'Cloud scanner took too long. Please use a smaller, clear PNG/JPG floor plan and retry.']);
+}
+error_log('[VASTUAALAY] Scan process exit='.$status.' duration='.round(microtime(true)-$started,1).'s outputBytes='.strlen($stdout).' stderr='.substr($stderr,0,300));
 $decoded=json_decode((string)$stdout,true);
 if(!is_array($decoded)){
     $diagnostic=trim((string)$stderr); if($diagnostic==='') $diagnostic='Python returned no JSON. Exit code: '.$status.'; first output: '.substr(trim((string)$stdout),0,150);
