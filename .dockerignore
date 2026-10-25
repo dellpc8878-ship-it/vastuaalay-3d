@@ -1,0 +1,10 @@
+.git
+.gitignore
+uploads/*
+!uploads/.htaccess
+storage/*
+!storage/.htaccess
+__pycache__/
+*.pyc
+*.zip
+*.log

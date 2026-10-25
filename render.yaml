@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: vastuaalay-3d
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health.php
+    envVars:
+      - key: PORT
+        value: 10000

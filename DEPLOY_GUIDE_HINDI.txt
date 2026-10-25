@@ -1,0 +1,41 @@
+VASTUAALAY 3D - RENDER FREE LIVE DEPLOY
+=======================================
+
+Ye folder existing V7 PHP + Python + Tesseract 3D application ka cloud-ready version hai.
+Aapke PC ke XAMPP ke code ko is ZIP se overwrite mat karna. Ye alag GitHub repo ke liye hai.
+
+STEPS (FREE):
+1. ZIP ko EXTRACT ALL karo. Andar Dockerfile, render.yaml, index.php aur assets/ folder hone chahiye.
+2. github.com par login > + > New repository > name: vastuaalay-3d > Create repository.
+3. GitHub repo me 'Add file' > 'Upload files' karke EXTRACTED FOLDER KE ANDAR ki sab files/folders upload karo.
+   Note: GitHub web UI drag-drop directories support browser par depend karta hai.
+   Agar folder upload na ho, GitHub Desktop se folder ko publish karo (instructions neeche).
+4. dashboard.render.com > New > Blueprint > GitHub connect > apna vastuaalay-3d repo select karo.
+5. Render ko render.yaml read karke Docker Free Web Service banana chahiye. Review karo: plan FREE hi rahe.
+6. Deploy complete ho to Render service ki 'onrender.com' link kholo.
+7. 3D image upload karke API test karo. First deploy ko Docker + Python/Tesseract setup build karna padega.
+
+ALTERNATIVE WITHOUT BLUEPRINT:
+ Render > New > Web Service > GitHub repo > Language: Docker > Instance Type: Free > Create Web Service.
+ Dockerfile project ROOT mein hona chahiye.
+
+IMPORTANT FREE LIMITATIONS:
+- Render Free service 15 min inactivity ke baad spin down; next open par ~1 min lag sakta hai.
+- 512MB RAM + 0.1 CPU; heavy OCR requests slow ya fail ho sakte hain. Light plans se test karo.
+- Uploaded images ephemeral; restart/redeploy/spin down par lose ho sakti hain.
+- Public trial/demo ke liye suitable; real customer files ko permanent safe storage ke liye alag service chahiye.
+- Three.js aur fonts CDN se load hote hain; visitors ko internet chahiye.
+- Live domain Render khud provide karta hai, e.g. https://YOUR-SERVICE.onrender.com.
+- GitHub repo ko private banana accha hai; users ke personal uploaded plans ko repo mein include nahi kiya gaya.
+- Render par Docker image build locally run hua hai, is baat ki confirmation nahi hai.
+
+GITHUB DESKTOP METHOD:
+ github.com par repo create karo; GitHub Desktop > File > Add local repository ya
+ Create a new repository (choose extracted folder as local path) > Publish Repository;
+ phir Render connect karo.
+
+Technical:
+ PHP Apache + Python 3 + OpenCV (headless) + Pillow + PyMuPDF + pytesseract + tesseract binary
+ Uses original scan.php API and V7 interface. No database required.
+ /health.php for Render health check.
+

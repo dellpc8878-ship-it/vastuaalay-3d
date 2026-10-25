@@ -1,0 +1,11 @@
+# Keep users' private uploaded floor plans out of git.
+uploads/*
+!uploads/.gitkeep
+!uploads/.htaccess
+storage/*
+!storage/.gitkeep
+!storage/.htaccess
+.env
+*.log
+__pycache__/
+*.pyc
